@@ -308,7 +308,15 @@ class Compiler:
     return subprocess.Popen(argv.split() + [str(a) for a in args], stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=0)
   def compile_server(self, src:str, proc:subprocess.Popen) -> bytes:
     unwrap(proc.stdin).write(struct.pack("I", len(src.encode())) + src.encode())
-    if (lib:=unwrap(proc.stdout).read(struct.unpack("I", unwrap(proc.stdout).read(4))[0])): return lib
+    # the pipe is unbuffered (bufsize=0), so one raw read(n) can return fewer than n bytes; a cubin larger than the
+    # pipe buffer arrives in pieces and a truncated one fails later in elf_loader instead of here
+    def readexactly(n:int) -> bytes:
+      buf = bytearray()
+      while len(buf) < n:
+        if not (chunk:=unwrap(proc.stdout).read(n - len(buf))): raise CompileError(f"compile server closed after {len(buf)} of {n} bytes")
+        buf += chunk
+      return bytes(buf)
+    if (lib:=readexactly(struct.unpack("I", readexactly(4))[0])): return lib
     raise CompileError("Compilation Error")
 
 
